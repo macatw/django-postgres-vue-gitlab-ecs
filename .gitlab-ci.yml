@@ -1,0 +1,80 @@
+stages:
+  - renovate
+  - documentation
+  - test
+  - build
+  - integration
+  - release
+  - deploy
+
+include:
+  - local: /gitlab-ci/documentation.yml
+  - local: /gitlab-ci/renovate.yml
+  - local: /gitlab-ci/aws/cdk.yml
+  - local: /gitlab-ci/aws/dev.yml
+  - local: /gitlab-ci/aws/app.yml
+
+.Pytest:
+  image: python:3.8
+  stage: test
+  services:
+    - postgres:11.5
+    - redis:5.0
+  variables:
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/postgres"
+    DJANGO_SETTINGS_MODULE: "backend.settings.gitlab-ci"
+    SECRET_KEY: "secret"
+    STACK_NAME: "placeholder"
+    DEBUG: "True"
+  before_script:
+    - cd backend
+    - pip install -r requirements/test.txt
+    - pip install -r requirements/base.txt
+  script:
+    - flake8
+    - black -l 79 -S --check .
+    - pytest --cov
+  after_script:
+    - echo "Pytest tests complete"
+  coverage: "/TOTAL.+ ([0-9]{1,3}%)/"
+
+.Jest:
+  image: node:12.19.0
+  stage: test
+  before_script:
+    - cd quasar
+    - npm install --progress=false
+  script:
+    - npm run lint
+    - npm run test
+  after_script:
+    - echo "Jest tests complete"
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+
+# gitlab-runner exec docker "e2e cypress tests without docker-compose"
+.e2e:
+  stage: integration
+  image: docker:19.03.13
+  only:
+    - master
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_DRIVER: overlay2
+  services:
+    - docker:19.03.13-dind
+  before_script:
+    - apk add --update py-pip
+    - pip install docker-compose~=1.23.0
+  script:
+    - sh integration-tests.sh
+  artifacts:
+    paths:
+      - cypress/videos/
+      - tests/screenshots/
+    expire_in: 2 days
+
+
+# # use this test with gitlab-runner locally
+# .e2e-local:
+#   <<: *cypress
+#   image: localhost:5000/backend:latest

@@ -1,0 +1,54 @@
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: django-channels
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: django-channels-container
+  template:
+    metadata:
+      labels:
+        app: django-channels-container
+    spec:
+      containers:
+        - name: backend
+          imagePullPolicy: IfNotPresent
+          image: backend:14
+          command: ["daphne", "backend.asgi:application", "--bind", "0.0.0.0", "--port", "9000"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9000
+          readinessProbe:
+            # an http probe
+            httpGet:
+              path: /readiness
+              port: 9000
+            initialDelaySeconds: 20
+            timeoutSeconds: 5
+          ports:
+          - containerPort: 9000
+          env:
+            - name: DJANGO_SETTINGS_MODULE
+              value: 'backend.settings.minikube'
+
+            - name: SECRET_KEY
+              value: "my-secret-key"
+
+            - name: POSTGRES_NAME
+              value: postgres
+
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: user
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+

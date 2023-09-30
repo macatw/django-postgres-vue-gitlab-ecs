@@ -1,0 +1,86 @@
+version: '3.7'
+
+services:
+
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:11.5
+    networks:
+      - main
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=postgres123
+
+  backend: &backend
+    container_name: backend
+    build:
+      context: ./backend
+      dockerfile: scripts/prod/Dockerfile
+    command: >
+      bash -c "
+        python3 manage.py makemigrations
+        python3 manage.py migrate --no-input
+        python3 manage.py create_default_user
+        gunicorn -t 300 -b 0.0.0.0:8000 backend.wsgi
+      "
+    networks:
+      - main
+    volumes:
+      - ./backend:/code
+      - django-static:/code/static
+    depends_on:
+      - postgres
+    environment:
+      - SECRET_KEY='secret'
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=backend.settings.gitlab-ci
+      - POSTGRES_PASSWORD=postgres123
+
+  asgiserver:
+    <<: *backend
+    container_name: asgiserver
+    command:
+      - "daphne"
+      - "backend.asgi:application"
+      - "--bind"
+      - "0.0.0.0"
+      - "--port"
+      - "9000"
+    volumes:
+      - ./backend:/code
+
+  nginx:
+    container_name: nginx
+    build:
+      context: .
+      dockerfile: nginx/ci/Dockerfile
+    ports:
+      - 80:80
+    networks:
+      - main
+    volumes:
+      - django-static:/usr/src/app/static
+    depends_on:
+      - backend
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - main
+
+volumes:
+  django-static:
+  portainer-data:
+  pg-data:
+  redis-data:
+
+networks:
+  main:
+    driver: bridge

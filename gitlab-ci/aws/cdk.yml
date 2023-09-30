@@ -1,0 +1,86 @@
+# This template uses AWS CDK and AWS CLI to make infrastrcutre updates
+# and to deploy changes to the frontend and backend
+
+.quasar_build_pwa:
+  image: node:12
+  stage: build
+  variables:
+    FULL_DOMAIN_NAME: ${ENVIRONMENT}.${DOMAIN_NAME}
+    GOOGLE_OAUTH2_KEY: google123
+    GITHUB_KEY: github123
+  artifacts:
+    paths:
+      - quasar/dist/pwa
+  before_script:
+    - npm install -g @quasar/cli
+    - cd quasar
+    - npm install --progress=false
+  script:
+    - quasar build -m pwa
+
+.cdk_deploy:
+  image: docker:19.03.1
+  services:
+    - docker:19.03.5-dind
+  stage: deploy
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add nodejs-current npm
+    - npm i -g aws-cdk
+    - apk add --no-cache python3
+    - pip3 install -e awscdk
+  script:
+    - cdk bootstrap --app awscdk/app.py aws://$AWS_ACCOUNT_ID/$AWS_DEFAULT_REGION
+    - cdk deploy --app awscdk/app.py --require-approval never
+
+.base_task: &task
+  image: python:3.8
+  stage: deploy
+  before_script:
+    - pip install awscli
+    - apt-get -qq update && apt-get -y install jq
+    - |
+      subnets=$( \
+        aws ec2 describe-subnets \
+          --filters \
+            Name=tag:StackName,Values=${ENVIRONMENT}-${APP_NAME} \
+            Name=tag:aws-cdk:subnet-type,Values=Public \
+        | jq -r '.Subnets | map(.SubnetId) | join(",")')
+  script:
+    - |
+      aws ecs run-task \
+        --cluster ${ENVIRONMENT}-${APP_NAME}-cluster \
+        --task-definition ${ENVIRONMENT}-${APP_NAME}-${TASK_SUFFIX} \
+        --network-configuration "awsvpcConfiguration={subnets=[${subnets}],assignPublicIp=ENABLED}" \
+        --count 1 \
+        --launch-type FARGATE
+
+.collectstatic:
+  <<: *task
+  variables:
+    TASK_SUFFIX: collectstatic
+
+.migrate:
+  <<: *task
+  variables:
+    TASK_SUFFIX: migrate
+
+.createsuperuser:
+  <<: *task
+  variables:
+    TASK_SUFFIX: create-superuser
+
+.cdk_destroy:
+  image: python:3.8
+  stage: deploy
+  before_script:
+    - apt-get -qq update && apt-get -y install nodejs npm
+    - node -v
+    - npm i -g aws-cdk
+    - pip3 install awscli
+    - pip3 install -e awscdk
+  script:
+    - aws s3 rb --force s3://${ENVIRONMENT}-${APP_NAME}-frontend
+    - aws s3 rb --force s3://${ENVIRONMENT}-${APP_NAME}-assets
+    - cdk destroy --app awscdk/app.py --force

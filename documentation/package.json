@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "docs:dev": "vuepress dev docs",
+    "docs:build": "vuepress build docs",
+    "start": "http-server /app/docs/.vuepress/dist -p 8002",
+    "local": "nodemon --ext md,vue --watch .vuepress --watch . --exec vuepress dev docs"
+  },
+  "dependencies": {
+    "vuepress": "1.7.1",
+    "@vuepress/plugin-google-analytics": "1.7.1"
+  },
+  "devDependencies": {
+    "nodemon": "2.0.6"
+  }
+}
